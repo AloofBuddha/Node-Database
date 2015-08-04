@@ -1,7 +1,8 @@
-var http = require('http');
-    url  = require('url');
+'use strict';
 
-var database = {}; // will need to read from file here
+var http = require('http'),
+    url  = require('url'),
+    fs   = require('fs');
 
 var setRegex = /^\/set\?.+=.+$/,  // /set?somekey=somevalue
     getRegex = /^\/get\?key=.+$/; // /get?key=somekey
@@ -9,44 +10,60 @@ var setRegex = /^\/set\?.+=.+$/,  // /set?somekey=somevalue
 http.createServer(requestListener).listen(4000);
 
 function requestListener (request, response) { 
-    var query = url.parse(request.url).query,
-        parsedQuery, key, val; 
+  var query = url.parse(request.url, true).query;
 
-    // SET
-    if (setRegex.test(request.url)) {
-        parsedQuery = query.split('=');
-        key = parsedQuery[0];
-        val = parsedQuery[1];
+  // SET
+  if (setRegex.test(request.url)) 
+    onSet(query, function (data) {
+        console.log("Updated database", data);
+        onSuccess("Success: database updated");
+    });
 
-        database[key] = val; // Note: w/o parsing, val is always a string
-        console.log("Updated database", database);
+  // GET
+  else if (getRegex.test(request.url))
+    onGet(query.key, function (err, data) {
+      if (err) return onError(err);
+      
+      onSuccess(data);
+    });
 
-        onSuccess(response, "Success: " + query);
+  // Invalid Request     
+  else                               
+    onError("Invalid Request - " + request.url);
 
-    // GET
-    } else if (getRegex.test(request.url)) {
-        parsedQuery = query.split('=');
-        key = parsedQuery[1];
-        val = database[key];
+  function onSet(query, callback) {
+    fs.readFile('database.json', function (err, data) {
+      var database = JSON.parse(data.toString()),
+          key = Object.keys(query)[0],
+          val = query[key];   // Note: w/o parsing, val is always a string
+          
+      database[key] = val;
+          
+      fs.writeFile('database.json', 
+        JSON.stringify(database), 
+        function () { callback(database); });
+    });
+  }
 
-        if (val !== undefined) {
-            onSuccess(response, val);
-        } else {
-            onError(response, "Key '" + key + "' not found in database");
-        }
+  function onGet(key, callback) {
+    fs.readFile('database.json', function (err, data) {
+      var database = JSON.parse(data.toString()),
+          val      = database[key];
 
-    // Invalid Request
-    } else {
-        onError(response, "Invalid Request - " + request.url);
-    }
-}
+      if (val === undefined) 
+        callback("Key '" + key + "' not found in database");
+      else 
+        callback(null, val);
+    }); 
+  }
 
-function onSuccess (response, body) {
-    response.writeHead(200, {'Content-Type': 'text/plain'});
-    response.end(body);
-}
+  function onSuccess (body) {
+      response.writeHead(200, {'Content-Type': 'text/plain'});
+      response.end(body);
+  }
 
-function onError (response, body) {
-    response.writeHead(404, {'Content-Type': 'text/plain'});
-    response.end(body);
+  function onError (body) {
+      response.writeHead(404, {'Content-Type': 'text/plain'});
+      response.end(body);
+  }
 }
